@@ -44,7 +44,7 @@ export default function HomePage() {
       }
       setLoading(true);
       try {
-        const response = await axios.get('http://localhost:4000/api/routes', { params: { search: searchTerm } });
+        const response = await axios.get('https://my-bus-planner-api-to13.onrender.com/api/routes', { params: { search: searchTerm } });
         setOptions(response.data);
       } catch (error) { console.error('Failed to fetch routes:', error); setOptions([]); }
       setLoading(false);

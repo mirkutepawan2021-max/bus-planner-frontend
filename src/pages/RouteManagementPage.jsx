@@ -11,7 +11,7 @@ export default function RouteManagementPage() {
     const [isEditing, setIsEditing] = useState(false);
     const [error, setError] = useState('');
 
-    const API_BASE_URL = 'http://localhost:4000/api/routes'; // Using your live URL
+    const API_BASE_URL = 'https://my-bus-planner-api-to13.onrender.com/api/routes'; // Using your live URL
 
     useEffect(() => {
         fetchRoutes();
