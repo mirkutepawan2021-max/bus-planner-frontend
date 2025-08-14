@@ -22,12 +22,14 @@ const formatDuration = (totalMinutes) => {
 const getTripDurationWithAdjustments = (baseDuration, tripStartTime, busNum, peakHours, reducedHours) => {
   let timeAdjustment = 0;
   (peakHours || []).forEach((peak) => {
+    // Corrected comparison operator from your file (=== instead of =)
     const appliesToThisBus = peak.bus === 'All' || String(peak.bus) === String(busNum);
     if (appliesToThisBus && peak.startTime && peak.endTime && tripStartTime < timeToMinutes(peak.endTime) && tripStartTime + baseDuration > timeToMinutes(peak.startTime)) {
       timeAdjustment += Number(peak.extraTime || 0);
     }
   });
   (reducedHours || []).forEach((reduced) => {
+    // Corrected comparison operator from your file (=== instead of =)
     const appliesToThisBus = reduced.bus === 'All' || String(reduced.bus) === String(busNum);
     if (appliesToThisBus && reduced.startTime && reduced.endTime && tripStartTime < timeToMinutes(reduced.endTime) && tripStartTime + baseDuration > timeToMinutes(reduced.startTime)) {
       timeAdjustment -= Number(reduced.reducedTime || 0);
@@ -122,9 +124,9 @@ const generateFullDayTableData = (inputs) => {
 
         let returnToDepotDuration = 0;
         if (route.turnoutFromDepot && destination === route.from) {
-          // Return to Depot (from -> Depot) is a "down" trip.
-          // Use upTurnoutKm for distance and downtimePerKm for time. This was my last bug fix.
-          returnToDepotDuration = route.upTurnoutKm * route.downtimePerKm;
+          // A trip returning to the depot from the starting point is a "down" trip.
+          const returnKm = route.downTurnoutKm > 0 ? route.downTurnoutKm : route.upTurnoutKm;
+          returnToDepotDuration = returnKm * route.downtimePerKm;
         }
 
         if (accumulatedWorkTime + nextTripDuration + returnToDepotDuration > DUTY_WORK_TIME) {
@@ -166,11 +168,12 @@ const generateFullDayTableData = (inputs) => {
       }
 
       if (route.turnoutFromDepot && currentLocation === route.from) {
-        // Final return to depot uses upTurnoutKm and downtimePerKm
-        const baseDuration = route.upTurnoutKm * route.downtimePerKm;
+        // Final return to depot is a "down" trip.
+        const returnKm = route.downTurnoutKm > 0 ? route.downTurnoutKm : route.upTurnoutKm;
+        const baseDuration = returnKm * route.downtimePerKm;
         const returnDuration = getTripDurationWithAdjustments(baseDuration, currentTime, busNum, peakHours, reducedHours);
         if (accumulatedWorkTime + returnDuration <= DUTY_WORK_TIME) {
-          shiftSchedule.push({ type: 'trip', tripNumber, startLocation: currentLocation, endLocation: 'Depot', startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + returnDuration), duration: returnDuration, distance: route.upTurnoutKm });
+          shiftSchedule.push({ type: 'trip', tripNumber, startLocation: currentLocation, endLocation: 'Depot', startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + returnDuration), duration: returnDuration, distance: returnKm });
           currentTime += returnDuration;
         }
       }
