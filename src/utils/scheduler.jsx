@@ -65,9 +65,12 @@ const generateFullDayTableData = (inputs) => {
   
   const breakLocation = (inputs.breakLocation || '').trim();
 
+  // --- DEFINITIVE LOCATION FIX ---
+  // Create normalized (lowercase) versions of locations for robust logical comparisons.
   const routeFromNormalized = route.from.toLowerCase();
   const routeToNormalized = route.to.toLowerCase();
   const breakLocationNormalized = breakLocation.toLowerCase();
+  // --- END OF LOCATION FIX ---
 
   const { peakHours, reducedHours } = inputs;
   const allSchedules = [];
@@ -88,10 +91,14 @@ const generateFullDayTableData = (inputs) => {
         MAX_WORK_BEFORE_BREAK = 240,
         MIN_WORK_BEFORE_BREAK = 150;
 
+      const NUM_BUSES_FOR_EARLY_BREAK = 2;
+      const TRIPS_BEFORE_EARLY_BREAK = 4;
+
       let currentTime = shiftCallingTime,
         accumulatedWorkTime = 0,
         breakTaken = false,
-        tripNumber = 1;
+        tripNumber = 1,
+        revenueTripsCompleted = 0;
 
       shiftSchedule.push({ type: 'event', name: 'Calling Time', time: minutesToTime(currentTime) });
       currentTime += READY_TIME;
@@ -111,6 +118,7 @@ const generateFullDayTableData = (inputs) => {
 
       let currentLocation = route.from;
       while (true) {
+        // Use normalized locations for logic
         const isUpTrip = currentLocation.toLowerCase() === routeFromNormalized;
         const destination = isUpTrip ? route.to : route.from;
         
@@ -130,23 +138,25 @@ const generateFullDayTableData = (inputs) => {
           break;
         }
         
-        // --- REVERTED "EARLY LAST BUS" BREAK LOGIC ---
         let shouldTakeBreak = false;
         if (!breakTaken && currentLocation.toLowerCase() === breakLocationNormalized) {
-          const workTimeAfterNextTrip = accumulatedWorkTime + nextTripDuration;
-          // Rule 1: Force ONLY THE LAST BUS to take an early break to create a stagger.
-          if (busNum === numberOfBuses && accumulatedWorkTime >= MIN_WORK_BEFORE_BREAK) {
-            shouldTakeBreak = true;
-          }
-          // Rule 2: All other buses only break when mandatory (approaching 4 hours).
-          else if (workTimeAfterNextTrip > MAX_WORK_BEFORE_BREAK) {
-            shouldTakeBreak = true;
+          const isEarlyBreakBus = busNum > numberOfBuses - NUM_BUSES_FOR_EARLY_BREAK;
+
+          if (isEarlyBreakBus) {
+            if (revenueTripsCompleted >= TRIPS_BEFORE_EARLY_BREAK && accumulatedWorkTime >= MIN_WORK_BEFORE_BREAK) {
+              shouldTakeBreak = true;
+            }
+          } else {
+            const workTimeAfterNextTrip = accumulatedWorkTime + nextTripDuration;
+            if (workTimeAfterNextTrip > MAX_WORK_BEFORE_BREAK) {
+              shouldTakeBreak = true;
+            }
           }
         }
-        // --- END OF REVERTED LOGIC ---
 
         if (shouldTakeBreak) {
           if (accumulatedWorkTime + BREAK_DURATION <= DUTY_WORK_TIME) {
+            // Use original case for display
             shiftSchedule.push({ type: 'break', startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + BREAK_DURATION), duration: BREAK_DURATION, location: breakLocation });
             currentTime += BREAK_DURATION;
             accumulatedWorkTime += BREAK_DURATION;
@@ -157,10 +167,12 @@ const generateFullDayTableData = (inputs) => {
           }
         }
         
+        // Use original case for display
         shiftSchedule.push({ type: 'trip', tripNumber, startLocation: currentLocation, endLocation: destination, startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + nextTripDuration), duration: nextTripDuration, distance });
         currentTime += nextTripDuration;
         accumulatedWorkTime += nextTripDuration;
         currentLocation = destination;
+        revenueTripsCompleted++;
         tripNumber++;
       }
 
@@ -259,7 +271,6 @@ const generateFullDayTableData = (inputs) => {
 
     if (breakEvent) {
       dutySummaryData.push({ busNo: shift.busNum, shiftNo: shift.shiftNum, callingTime, shiftStart, workStart: shiftStart, workEnd: breakEvent.startTime, totalHours: totalDuration, isSecondRow: false });
-      dutySummaryData.push({ busNo: shift.busNum, shiftNo: shift.shiftNum, callingTime: '--', shiftStart: '--', workStart: `Break`, workEnd: `(${Math.round(breakEvent.duration)} mins at ${breakEvent.location})`, totalHours: '--', isSecondRow: true });
       dutySummaryData.push({ busNo: shift.busNum, shiftNo: shift.shiftNum, callingTime: '--', shiftStart: '--', workStart: breakEvent.endTime, workEnd: signOff, totalHours: '--', isSecondRow: true });
     } else {
       dutySummaryData.push({ busNo: shift.busNum, shiftNo: shift.shiftNum, callingTime, shiftStart, workStart: shiftStart, workEnd: signOff, totalHours: totalDuration, isSecondRow: false });
