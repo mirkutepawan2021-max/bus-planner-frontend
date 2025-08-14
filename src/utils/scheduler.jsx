@@ -22,14 +22,12 @@ const formatDuration = (totalMinutes) => {
 const getTripDurationWithAdjustments = (baseDuration, tripStartTime, busNum, peakHours, reducedHours) => {
   let timeAdjustment = 0;
   (peakHours || []).forEach((peak) => {
-    // Corrected comparison operator from your file (=== instead of =)
     const appliesToThisBus = peak.bus === 'All' || String(peak.bus) === String(busNum);
     if (appliesToThisBus && peak.startTime && peak.endTime && tripStartTime < timeToMinutes(peak.endTime) && tripStartTime + baseDuration > timeToMinutes(peak.startTime)) {
       timeAdjustment += Number(peak.extraTime || 0);
     }
   });
   (reducedHours || []).forEach((reduced) => {
-    // Corrected comparison operator from your file (=== instead of =)
     const appliesToThisBus = reduced.bus === 'All' || String(reduced.bus) === String(busNum);
     if (appliesToThisBus && reduced.startTime && reduced.endTime && tripStartTime < timeToMinutes(reduced.endTime) && tripStartTime + baseDuration > timeToMinutes(reduced.startTime)) {
       timeAdjustment -= Number(reduced.reducedTime || 0);
@@ -49,34 +47,38 @@ const generateFullDayTableData = (inputs) => {
     return { headers: [], rows: [], allSchedules: [], dutySummaryData: [] };
   }
 
-  // --- MERGED LOGIC ---
-  // A safe fallback value for time per km.
   const generalTimePerKm = Number(inputs.route.timePerKm || inputs.route.timeperkm || 2);
-  
-  // Robustly get the directional times from multiple possible casings, as you provided.
   const uptimePerKmValue = Number(inputs.route.uptimePerKm || inputs.route.uptimeperkm);
   const downtimePerKmValue = Number(inputs.route.downtimePerKm || inputs.route.downtimeperkm);
 
   const route = {
     ...inputs.route,
+    from: (inputs.route.from || 'Start').trim(),
+    to: (inputs.route.to || 'End').trim(),
     upTurnoutKm: Number(inputs.route.upturnoutKm || inputs.route.upTurnoutKm || 0),
     downTurnoutKm: Number(inputs.route.downturnoutKm || inputs.route.downTurnoutKm || 0),
     upregularKm: Number(inputs.route.upkm || inputs.route.upregularKm || inputs.route.upregularkm || 0),
     downregularKm: Number(inputs.route.downkm || inputs.route.downregularKm || inputs.route.downregularkm || 0),
-    // Use your directional variables, but keep my safety check to prevent zero-minute trips.
     uptimePerKm: uptimePerKmValue > 0 ? uptimePerKmValue : generalTimePerKm,
     downtimePerKm: downtimePerKmValue > 0 ? downtimePerKmValue : generalTimePerKm,
   };
-  // --- END OF MERGED LOGIC ---
+  
+  const breakLocation = (inputs.breakLocation || '').trim();
 
-  const { callingTime, breakLocation, peakHours, reducedHours } = inputs;
+  // --- DEFINITIVE LOCATION FIX ---
+  // Create normalized (lowercase) versions of locations for robust logical comparisons.
+  const routeFromNormalized = route.from.toLowerCase();
+  const routeToNormalized = route.to.toLowerCase();
+  const breakLocationNormalized = breakLocation.toLowerCase();
+  // --- END OF LOCATION FIX ---
+
+  const { peakHours, reducedHours } = inputs;
   const allSchedules = [];
 
   for (let busNum = 1; busNum <= numberOfBuses; busNum++) {
-    // Stagger calculation now correctly uses directional times.
     const avgRoundTripTime = (route.upregularKm * route.uptimePerKm) + (route.downregularKm * route.downtimePerKm);
     const busStagger = ((busNum - 1) * avgRoundTripTime) / numberOfBuses;
-    let lastSignOffTime = timeToMinutes(callingTime) + busStagger;
+    let lastSignOffTime = timeToMinutes(inputs.callingTime) + busStagger;
 
     for (let shiftNum = 1; shiftNum <= 2; shiftNum++) {
       const shiftHeader = `Bus ${busNum} - S${shiftNum}`;
@@ -89,10 +91,14 @@ const generateFullDayTableData = (inputs) => {
         MAX_WORK_BEFORE_BREAK = 240,
         MIN_WORK_BEFORE_BREAK = 150;
 
+      const NUM_BUSES_FOR_EARLY_BREAK = 2;
+      const TRIPS_BEFORE_EARLY_BREAK = 4;
+
       let currentTime = shiftCallingTime,
         accumulatedWorkTime = 0,
         breakTaken = false,
-        tripNumber = 1;
+        tripNumber = 1,
+        revenueTripsCompleted = 0;
 
       shiftSchedule.push({ type: 'event', name: 'Calling Time', time: minutesToTime(currentTime) });
       currentTime += READY_TIME;
@@ -100,7 +106,6 @@ const generateFullDayTableData = (inputs) => {
       shiftSchedule.push({ type: 'event', name: 'Ready', time: minutesToTime(currentTime) });
 
       if (route.turnoutFromDepot) {
-        // Depot -> from is an "up" trip.
         const baseDuration = route.upTurnoutKm * route.uptimePerKm; 
         const turnoutDuration = getTripDurationWithAdjustments(baseDuration, currentTime, busNum, peakHours, reducedHours);
         if (accumulatedWorkTime + turnoutDuration <= DUTY_WORK_TIME) {
@@ -113,18 +118,18 @@ const generateFullDayTableData = (inputs) => {
 
       let currentLocation = route.from;
       while (true) {
-        const isUpTrip = currentLocation === route.from;
+        // Use normalized locations for logic
+        const isUpTrip = currentLocation.toLowerCase() === routeFromNormalized;
+        const destination = isUpTrip ? route.to : route.from;
         
         const distance = isUpTrip ? route.upregularKm : route.downregularKm;
         const timePerKm = isUpTrip ? route.uptimePerKm : route.downtimePerKm;
-        const destination = isUpTrip ? route.to : route.from;
 
         const baseDuration = distance * timePerKm;
         const nextTripDuration = getTripDurationWithAdjustments(baseDuration, currentTime, busNum, peakHours, reducedHours);
 
         let returnToDepotDuration = 0;
-        if (route.turnoutFromDepot && destination === route.from) {
-          // A trip returning to the depot from the starting point is a "down" trip.
+        if (route.turnoutFromDepot && destination.toLowerCase() === routeFromNormalized) {
           const returnKm = route.downTurnoutKm > 0 ? route.downTurnoutKm : route.upTurnoutKm;
           returnToDepotDuration = returnKm * route.downtimePerKm;
         }
@@ -133,23 +138,25 @@ const generateFullDayTableData = (inputs) => {
           break;
         }
         
-        // --- THIS IS THE CORRECT "EARLY LAST BUS" BREAK LOGIC ---
         let shouldTakeBreak = false;
-        if (!breakTaken && currentLocation === breakLocation) {
+        if (!breakTaken && currentLocation.toLowerCase() === breakLocationNormalized) {
+          const isEarlyBreakBus = busNum > numberOfBuses - NUM_BUSES_FOR_EARLY_BREAK;
+
+          if (isEarlyBreakBus) {
+            if (revenueTripsCompleted >= TRIPS_BEFORE_EARLY_BREAK && accumulatedWorkTime >= MIN_WORK_BEFORE_BREAK) {
+              shouldTakeBreak = true;
+            }
+          } else {
             const workTimeAfterNextTrip = accumulatedWorkTime + nextTripDuration;
-            // Rule 1 (Highest Priority): Force ONLY THE LAST BUS to take an early break.
-            if (busNum === numberOfBuses && accumulatedWorkTime >= MIN_WORK_BEFORE_BREAK) {
-                shouldTakeBreak = true;
+            if (workTimeAfterNextTrip > MAX_WORK_BEFORE_BREAK) {
+              shouldTakeBreak = true;
             }
-            // Rule 2 (Failsafe): ALL OTHER buses will only break when mandatory.
-            else if (workTimeAfterNextTrip > MAX_WORK_BEFORE_BREAK) {
-                shouldTakeBreak = true;
-            }
+          }
         }
-        // --- END OF CORRECT BREAK LOGIC ---
 
         if (shouldTakeBreak) {
           if (accumulatedWorkTime + BREAK_DURATION <= DUTY_WORK_TIME) {
+            // Use original case for display
             shiftSchedule.push({ type: 'break', startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + BREAK_DURATION), duration: BREAK_DURATION, location: breakLocation });
             currentTime += BREAK_DURATION;
             accumulatedWorkTime += BREAK_DURATION;
@@ -160,15 +167,16 @@ const generateFullDayTableData = (inputs) => {
           }
         }
         
+        // Use original case for display
         shiftSchedule.push({ type: 'trip', tripNumber, startLocation: currentLocation, endLocation: destination, startTime: minutesToTime(currentTime), endTime: minutesToTime(currentTime + nextTripDuration), duration: nextTripDuration, distance });
         currentTime += nextTripDuration;
         accumulatedWorkTime += nextTripDuration;
         currentLocation = destination;
+        revenueTripsCompleted++;
         tripNumber++;
       }
 
-      if (route.turnoutFromDepot && currentLocation === route.from) {
-        // Final return to depot is a "down" trip.
+      if (route.turnoutFromDepot && currentLocation.toLowerCase() === routeFromNormalized) {
         const returnKm = route.downTurnoutKm > 0 ? route.downTurnoutKm : route.upTurnoutKm;
         const baseDuration = returnKm * route.downtimePerKm;
         const returnDuration = getTripDurationWithAdjustments(baseDuration, currentTime, busNum, peakHours, reducedHours);
@@ -184,7 +192,6 @@ const generateFullDayTableData = (inputs) => {
     }
   }
 
-  // --- Table Formatting Logic (Unchanged from last correct version) ---
   allSchedules.sort((a, b) => {
     if (a.shiftNum !== b.shiftNum) return a.shiftNum - b.shiftNum;
     return a.busNum - b.busNum;
