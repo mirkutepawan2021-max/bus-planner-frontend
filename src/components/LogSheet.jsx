@@ -14,8 +14,10 @@ const LogSheet = ({ shiftData }) => {
   if (!shiftData) return <p>No shift data available.</p>;
 
   const { name, schedule, route } = shiftData;
+  
+  // This part remains the same, to correctly calculate total distance from trips only.
   const trips = schedule.filter(e => e.type === 'trip');
-  const totalDistance = trips.reduce((sum, trip) => sum + trip.distance, 0).toFixed(2);
+  const totalDistance = trips.reduce((sum, trip) => sum + (trip.distance || 0), 0).toFixed(2);
   const callingTime = schedule.find(e => e.name === 'Calling Time')?.time || '--';
   const signOffTime = schedule.find(e => e.name === 'Sign Off')?.time || '--';
 
@@ -49,16 +51,35 @@ const LogSheet = ({ shiftData }) => {
           </tr>
         </thead>
         <tbody>
-          {trips.map((trip, index) => (
-            <tr key={index}>
-              <td>{trip.tripNumber}</td>
-              <td>{trip.startLocation}</td>
-              <td>{trip.endLocation}</td>
-              <td>{trip.startTime}</td>
-              <td>{trip.endTime}</td>
-              <td>{trip.distance.toFixed(2)}</td>
-            </tr>
-          ))}
+          {/* --- DEFINITIVE FIX --- */}
+          {/* We now map over the FULL schedule, not just the filtered trips */}
+          {schedule.map((event, index) => {
+            if (event.type === 'trip') {
+              return (
+                <tr key={index}>
+                  <td>{event.tripNumber}</td>
+                  <td>{event.startLocation}</td>
+                  <td>{event.endLocation}</td>
+                  <td>{event.startTime}</td>
+                  <td>{event.endTime}</td>
+                  <td>{(event.distance || 0).toFixed(2)}</td>
+                </tr>
+              );
+            } else if (event.type === 'break') {
+              // This is the new row for the break.
+              return (
+                <tr key={index} className="table-info text-center">
+                  <td>Break</td>
+                  <td colSpan="5">
+                    {`${event.startTime} - ${event.endTime} (${Math.round(event.duration)} mins at ${event.location})`}
+                  </td>
+                </tr>
+              );
+            }
+            // Ignore other event types like 'Calling Time' inside the table body
+            return null;
+          })}
+          {/* --- END OF FIX --- */}
         </tbody>
       </Table>
     </div>
